@@ -90,7 +90,12 @@ struct BitReader<'a> {
     acc: u32,
     bits: u32,
     at_marker: bool,
+    /// Zero bytes fed in since the entropy-coded data ran out.
+    padded: u32,
 }
+
+/// More padding than the 4-byte look-ahead can explain: the scan is reading past its data.
+const MAX_PADDING: u32 = 16;
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8], pos: usize) -> Self {
@@ -100,6 +105,7 @@ impl<'a> BitReader<'a> {
             acc: 0,
             bits: 0,
             at_marker: false,
+            padded: 0,
         }
     }
 
@@ -118,6 +124,9 @@ impl<'a> BitReader<'a> {
                         self.pos += 1;
                     }
                 }
+            }
+            if self.at_marker {
+                self.padded = self.padded.saturating_add(1);
             }
             self.acc |= byte << (24 - self.bits);
             self.bits += 8;
@@ -159,10 +168,17 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// True once the reader has run well past the end of the scan's data, so everything it
+    /// returns is padding. A truncated file reaches this; so does a file of empty scans.
+    fn overrun(&self) -> bool {
+        self.padded > MAX_PADDING
+    }
+
     fn restart(&mut self) -> Result<()> {
         self.acc = 0;
         self.bits = 0;
         self.at_marker = false;
+        self.padded = 0;
         while self.data.get(self.pos) == Some(&0xFF) && self.data.get(self.pos + 1) == Some(&0xFF) {
             self.pos += 1;
         }
@@ -508,6 +524,12 @@ impl Decoder {
                         decode_block(comp, bx, by, &mut reader, scan, dc, ac, &mut eob_run)?;
                     }
                 }
+            }
+            if reader.overrun() {
+                // Out of data: leave the remaining blocks as they are (libjpeg does the same
+                // after a premature end of data) instead of decoding zero bits as symbols,
+                // which lets a tiny file of empty scans take minutes to decode.
+                break;
             }
         }
         Ok(next_marker(bytes, reader.pos))
@@ -1154,5 +1176,46 @@ mod tests {
                 let _ = RgbImage::decode(&copy);
             }
         }
+    }
+
+    #[test]
+    fn reader_reports_overrun_after_the_data_ends() {
+        let mut reader = BitReader::new(&[0xAB, 0xFF, 0xD9], 0);
+        assert_eq!(reader.bits(8), 0xAB);
+        assert!(
+            !reader.overrun(),
+            "look-ahead padding alone is not an overrun"
+        );
+        for _ in 0..MAX_PADDING * 8 {
+            reader.bits(1);
+        }
+        assert!(reader.overrun());
+    }
+
+    #[test]
+    fn empty_scans_stop_at_the_end_of_their_data() {
+        // A 4096x2048 progressive frame (131 072 blocks) followed by 2 000 DC scans with no
+        // entropy-coded data. Each scan used to decode every block from padding bits,
+        // 262 million blocks in all; now each stops after a few hundred.
+        let mut jpeg = vec![0xFF, 0xD8];
+        let mut dqt = vec![0];
+        dqt.extend_from_slice(&[1; 64]);
+        marker(&mut jpeg, 0xDB, &dqt);
+        marker(&mut jpeg, 0xC2, &[8, 0x08, 0x00, 0x10, 0x00, 1, 1, 0x11, 0]);
+        let mut dht = vec![0x00, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        dht.extend(0..12u8);
+        marker(&mut jpeg, 0xC4, &dht);
+        for _ in 0..2000 {
+            marker(&mut jpeg, 0xDA, &[1, 1, 0x00, 0, 0, 0]);
+        }
+        jpeg.extend_from_slice(&[0xFF, 0xD9]);
+        let start = std::time::Instant::now();
+        let image = RgbImage::decode(&jpeg).unwrap();
+        assert_eq!((image.width, image.height), (4096, 2048));
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "took {:?}",
+            start.elapsed()
+        );
     }
 }
