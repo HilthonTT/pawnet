@@ -67,6 +67,8 @@ All notable changes to this project are documented here. The format follows
 - `Predictor` has a new required method, `logit_gradient`, used by the heat maps.
 
 ### Fixed
+- `expand` into a folder that held a larger expansion removes the leftover `data_batch_*.bin`
+  files, which `train` would otherwise have loaded as extra training images.
 - Saving a model writes a temporary file and renames it, so an interrupted save can no longer
   corrupt the previous model.
 - Model files with oversized layer shapes, or with no layers, are rejected with an error instead of crashing.

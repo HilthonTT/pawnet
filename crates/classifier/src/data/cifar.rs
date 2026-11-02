@@ -190,6 +190,14 @@ impl DatasetKind {
             fs::write(&path, self.encode(&chunk))?;
             written.push(path);
         }
+        // `Split::files` loads every data_batch_*.bin, so batches left over from an earlier,
+        // larger save would silently join the training set.
+        for entry in fs::read_dir(dir)? {
+            let path = entry?.path();
+            if batch_number(&path).is_some_and(|n| n as usize > written.len()) {
+                fs::remove_file(&path)?;
+            }
+        }
         Ok(written)
     }
 
@@ -235,15 +243,7 @@ impl Split {
             .map_err(|e| Error::format(format!("cannot open {}: {e}\n{HINT}", dir.display())))?;
         let mut numbered: Vec<(u32, PathBuf)> = entries
             .filter_map(|entry| entry.ok().map(|e| e.path()))
-            .filter_map(|path| {
-                let name = path.file_name()?.to_str()?;
-                let n = name
-                    .strip_prefix("data_batch_")?
-                    .strip_suffix(".bin")?
-                    .parse()
-                    .ok()?;
-                Some((n, path))
-            })
+            .filter_map(|path| Some((batch_number(&path)?, path)))
             .collect();
         if numbered.is_empty() {
             return Err(Error::format(format!(
@@ -254,6 +254,16 @@ impl Split {
         numbered.sort();
         Ok(numbered.into_iter().map(|(_, path)| path).collect())
     }
+}
+
+/// The N of a `data_batch_N.bin` file name.
+fn batch_number(path: &Path) -> Option<u32> {
+    path.file_name()?
+        .to_str()?
+        .strip_prefix("data_batch_")?
+        .strip_suffix(".bin")?
+        .parse()
+        .ok()
 }
 
 pub fn empty_animal_dataset() -> Dataset {
@@ -389,6 +399,26 @@ mod tests {
         let loaded = loaded.unwrap();
         assert_eq!(loaded.labels, vec![42]);
         assert_eq!(loaded.class_names[42], "class42");
+    }
+
+    #[test]
+    fn save_removes_batches_left_by_a_larger_save() {
+        let dir = std::env::temp_dir().join(format!("cifar-stale-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for n in [1, 2, 5] {
+            fs::write(dir.join(format!("data_batch_{n}.bin")), b"old").unwrap();
+        }
+        fs::write(dir.join("test_batch.bin"), b"keep").unwrap();
+        let mut ds = empty_animal_dataset();
+        ds.push(&[3; IMAGE_LEN], 4);
+        let saved = save_animals(&ds, &dir).unwrap();
+        let files = Split::Train.files(&dir).unwrap();
+        let loaded = DatasetKind::Animals.load(&dir, Split::Train);
+        let test_kept = dir.join("test_batch.bin").exists();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(files, saved);
+        assert_eq!(loaded.unwrap().labels, vec![4]);
+        assert!(test_kept);
     }
 
     #[test]
