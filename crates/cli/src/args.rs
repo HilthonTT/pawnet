@@ -32,6 +32,21 @@ impl Options {
                 opts.named.insert("help".into(), None);
             } else if let Some(name) = arg.strip_prefix("--") {
                 let (key, value) = match name.split_once('=') {
+                    Some((key, value)) if Self::FLAGS.contains(&key) => {
+                        match value.to_ascii_lowercase().as_str() {
+                            "true" | "yes" | "1" => (key, None),
+                            "false" | "no" | "0" => {
+                                opts.named.remove(key);
+                                continue;
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "--{key} is a flag: use --{key} on its own, \
+                                     or --{key}=true / --{key}=false"
+                                ));
+                            }
+                        }
+                    }
                     Some((key, value)) => (key, Some(value.to_string())),
                     None if Self::FLAGS.contains(&name) => (name, None),
                     None => {
@@ -122,5 +137,16 @@ mod tests {
         let opts = parse(&["--epochs", "many"]);
         assert!(opts.get::<usize>("epochs", 1).is_err());
         assert!(opts.allow(&["lr"]).is_err());
+    }
+
+    #[test]
+    fn flags_with_values_are_switched_on_or_off() {
+        assert!(parse(&["--tta=true"]).flag("tta"));
+        assert!(parse(&["--tta=YES"]).flag("tta"));
+        assert!(!parse(&["--tta=false"]).flag("tta"));
+        assert!(!parse(&["--tta", "--tta=0"]).flag("tta"));
+        assert!(!parse(&["--resume=no"]).flag("resume"));
+        let words: Vec<String> = ["--json=maybe"].iter().map(|s| s.to_string()).collect();
+        assert!(Options::parse(&words).is_err());
     }
 }

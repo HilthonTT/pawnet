@@ -19,15 +19,15 @@ COMMANDS:
     export-samples    Save some test images as .png files to try `predict` on
     info              Show the network architecture
 
-COMMON OPTIONS:
+SHARED OPTIONS:
     --dataset <NAME>  animals | cifar10 | cifar100 [default: animals; evaluate
-                      picks it from the model's classes]
+                      picks it from the model's classes]   (all but predict, info)
     --data <DIR>      Dataset folder           [default: data/cifar-10-batches-bin,
-                      or data/cifar-100-binary for cifar100]
+                      or data/cifar-100-binary for cifar100] (all but predict, info)
     --model <PATHS>   Model file, folder of models, or comma-separated list. Several
                       models form an ensemble that averages their predictions.
-                      [default: models/pawnet.bin]
-    --threads <N>     Worker threads           [default: all cores]
+                      [default: models/pawnet.bin]  (train, evaluate, predict, info)
+    --threads <N>     Worker threads           [default: all cores] (train, evaluate)
 
 TRAIN OPTIONS:
     --epochs <N>            [default: 20]
