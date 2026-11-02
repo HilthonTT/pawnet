@@ -30,8 +30,16 @@ pub fn run(opts: &Options) -> AppResult {
     let json = opts.flag("json");
     let explain = opts.get_opt::<PathBuf>("explain")?;
     let several = opts.positional.len() > 1;
-    if let Some(out) = explain.as_ref().filter(|_| several) {
-        fs::create_dir_all(out)?;
+    if let Some(out) = &explain {
+        if several {
+            fs::create_dir_all(out)?;
+        } else if !out.is_dir() && !has_image_extension(out) {
+            return Err(format!(
+                "--explain {}: the file name must end in .png or .ppm (or name a folder)",
+                out.display()
+            )
+            .into());
+        }
     }
     let model = load_predictor(opts)?;
     let preprocessor = Preprocessor {
@@ -59,7 +67,7 @@ pub fn run(opts: &Options) -> AppResult {
                 let target = heat_map_path(out, path, several || out.is_dir());
                 let map = saliency.heat_map(model.as_ref(), &preprocessor, &image, ranked[0].0);
                 let rendered = map.render(&preprocessor.thumbnail(&image), HEAT_MAP_SCALE);
-                fs::write(&target, rendered.encode_ppm())?;
+                rendered.save(&target)?;
                 Some(target)
             }
             None => None,
@@ -166,7 +174,12 @@ fn heat_map_path(out: &Path, image: &str, in_directory: bool) -> PathBuf {
     let stem = Path::new(image)
         .file_stem()
         .map_or_else(|| "image".into(), |s| s.to_string_lossy());
-    out.join(format!("{stem}-heatmap.ppm"))
+    out.join(format!("{stem}-heatmap.png"))
+}
+
+fn has_image_extension(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("png") || e.eq_ignore_ascii_case("ppm"))
 }
 
 fn bar(fraction: f32, width: usize) -> String {
@@ -206,15 +219,23 @@ mod tests {
     fn names_heat_maps_after_the_image() {
         assert_eq!(
             heat_map_path(Path::new("maps"), "photos/cat.ppm", true),
-            Path::new("maps").join("cat-heatmap.ppm")
+            Path::new("maps").join("cat-heatmap.png")
         );
         assert_eq!(
             heat_map_path(Path::new("maps"), "dog.large.bmp", true),
-            Path::new("maps").join("dog.large-heatmap.ppm")
+            Path::new("maps").join("dog.large-heatmap.png")
         );
         assert_eq!(
             heat_map_path(Path::new("out/cat-map.ppm"), "photos/cat.ppm", false),
             Path::new("out/cat-map.ppm")
         );
+    }
+
+    #[test]
+    fn heat_map_files_need_an_image_extension() {
+        assert!(has_image_extension(Path::new("out/map.png")));
+        assert!(has_image_extension(Path::new("map.PPM")));
+        assert!(!has_image_extension(Path::new("map.jpg")));
+        assert!(!has_image_extension(Path::new("map")));
     }
 }

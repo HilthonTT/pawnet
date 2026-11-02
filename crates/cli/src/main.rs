@@ -16,7 +16,7 @@ COMMANDS:
     evaluate          Measure accuracy on the test set and print a confusion matrix
     predict <IMAGE>…  Classify your own .jpg, .png, .ppm or .bmp images
     expand            Write a bigger training set of flipped, shifted and rotated copies
-    export-samples    Save some test images as .ppm files to try `predict` on
+    export-samples    Save some test images as .png files to try `predict` on
     info              Show the network architecture
 
 COMMON OPTIONS:
@@ -65,9 +65,9 @@ EVALUATE / PREDICT OPTIONS:
     --tta                   Test-time augmentation: also classify the mirror image
     --fit <MODE>            predict only: crop | pad | stretch  [default: crop]
     --auto-contrast         predict only: stretch the brightness range first
-    --explain <OUT>         predict only: save a heat map (.ppm) of the pixels that drove
-                            the top class. OUT is a file for one image, or a folder that
-                            receives <image>-heatmap.ppm files for several
+    --explain <OUT>         predict only: save a heat map of the pixels that drove the
+                            top class. OUT is a .png or .ppm file for one image, or a
+                            folder that receives <image>-heatmap.png files for several
     --top <N>               predict only: how many classes to list  [default: 10]
     --json                  predict only: print the results as JSON
 
@@ -81,6 +81,7 @@ EXPORT-SAMPLES OPTIONS:
     --out <DIR>             [default: samples]
     --count <N>             [default: 12]
     --scale <N>             Upscale factor for easier viewing   [default: 4]
+    --format <NAME>         png | ppm                           [default: png]
 
 Get the dataset first with scripts/download_data.sh (Linux/macOS) or
 scripts\\download_data.ps1 (Windows); add `cifar100` for CIFAR-100.

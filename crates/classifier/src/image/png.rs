@@ -404,33 +404,82 @@ impl RgbImage {
         }
         Ok(Self::new(width, height, pixels))
     }
+
+    /// Encodes the image as an 8-bit RGB PNG.
+    ///
+    /// The pixel data is stored in uncompressed DEFLATE blocks, so the file is about as large
+    /// as a PPM, but every image viewer and browser can open it.
+    pub fn encode_png(&self) -> Vec<u8> {
+        let too_large = || panic!("{}x{} image is too large for PNG", self.width, self.height);
+        assert!(
+            self.width > 0 && self.height > 0,
+            "cannot encode an empty image"
+        );
+        let width = u32::try_from(self.width).unwrap_or_else(|_| too_large());
+        let height = u32::try_from(self.height).unwrap_or_else(|_| too_large());
+
+        let stride = self.width * 3;
+        let mut raw = Vec::with_capacity((stride + 1) * self.height);
+        for row in self.pixels.chunks_exact(stride) {
+            raw.push(0); // filter type: none
+            raw.extend_from_slice(row);
+        }
+
+        let mut header = [0u8; 13];
+        header[..4].copy_from_slice(&width.to_be_bytes());
+        header[4..8].copy_from_slice(&height.to_be_bytes());
+        header[8] = 8; // bit depth
+        header[9] = 2; // colour type: RGB
+
+        let mut out = Vec::with_capacity(raw.len() + raw.len() / STORED_BLOCK_MAX * 5 + 64);
+        out.extend_from_slice(&SIGNATURE);
+        write_chunk(&mut out, b"IHDR", &header);
+        for data in stored_zlib(&raw, STORED_BLOCK_MAX).chunks(MAX_IDAT) {
+            write_chunk(&mut out, b"IDAT", data);
+        }
+        write_chunk(&mut out, b"IEND", &[]);
+        out
+    }
+}
+
+const STORED_BLOCK_MAX: usize = 65_535;
+const MAX_IDAT: usize = 1 << 20;
+
+fn write_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    let start = out.len();
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    let crc = crc32(&out[start..]);
+    out.extend_from_slice(&crc.to_be_bytes());
+}
+
+/// Wraps `data` in a zlib stream of uncompressed DEFLATE blocks of at most `block_len` bytes.
+fn stored_zlib(data: &[u8], block_len: usize) -> Vec<u8> {
+    assert!((1..=STORED_BLOCK_MAX).contains(&block_len));
+    let blocks = data.len().div_ceil(block_len).max(1);
+    let mut out = Vec::with_capacity(data.len() + blocks * 5 + 6);
+    out.extend_from_slice(&[0x78, 0x01]);
+    for i in 0..blocks {
+        let block = &data[(i * block_len).min(data.len())..((i + 1) * block_len).min(data.len())];
+        let len = block.len() as u16;
+        out.push(u8::from(i + 1 == blocks));
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&(!len).to_le_bytes());
+        out.extend_from_slice(block);
+    }
+    out.extend_from_slice(&inflate::adler32(data).to_be_bytes());
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
-        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        let start = out.len();
-        out.extend_from_slice(kind);
-        out.extend_from_slice(data);
-        let crc = crc32(&out[start..]);
-        out.extend_from_slice(&crc.to_be_bytes());
-    }
+    use super::write_chunk as chunk;
 
     fn stored_zlib(data: &[u8]) -> Vec<u8> {
-        let mut out = vec![0x78, 0x01];
-        let blocks: Vec<&[u8]> = data.chunks(1000).collect();
-        for (i, block) in blocks.iter().enumerate() {
-            out.push(u8::from(i + 1 == blocks.len()));
-            let len = block.len() as u16;
-            out.extend_from_slice(&len.to_le_bytes());
-            out.extend_from_slice(&(!len).to_le_bytes());
-            out.extend_from_slice(block);
-        }
-        out.extend_from_slice(&inflate::adler32(data).to_be_bytes());
-        out
+        super::stored_zlib(data, 1000)
     }
 
     fn filter_rows(raw_rows: &[Vec<u8>], bpp: usize, filter: impl Fn(usize) -> u8) -> Vec<u8> {
@@ -794,5 +843,25 @@ mod tests {
             }
             let _ = RgbImage::decode(&copy);
         }
+    }
+
+    #[test]
+    fn encoded_png_round_trips() {
+        let img = RgbImage::new(2, 2, vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 10, 20, 30]);
+        let png = img.encode_png();
+        assert!(png.starts_with(&SIGNATURE));
+        assert!(png.ends_with(&[0xae, 0x42, 0x60, 0x82]), "IEND CRC");
+        assert_eq!(RgbImage::decode(&png).unwrap(), img);
+    }
+
+    #[test]
+    fn encoded_png_spans_several_deflate_blocks() {
+        // 200 rows of 601 bytes: about 120 kB, so two stored blocks of at most 65 535 bytes.
+        let (width, height) = (200, 200);
+        let pixels = (0..width * height * 3)
+            .map(|i| (i * 7 % 251) as u8)
+            .collect();
+        let img = RgbImage::new(width, height, pixels);
+        assert_eq!(RgbImage::decode(&img.encode_png()).unwrap(), img);
     }
 }

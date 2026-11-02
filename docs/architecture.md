@@ -40,7 +40,7 @@ and `DatasetExpansion` combined.
 | `crates/nn/src/network.rs` | the sequential `Network`, back-propagation, L2 regularisation |
 | `crates/nn/src/format.rs` | the [model file format](model-format.md) |
 | `crates/classifier/src/data/` | CIFAR-10 and CIFAR-100 readers/writers, normalisation, augmentation, dataset expansion |
-| `crates/classifier/src/image/` | JPEG, PNG (with DEFLATE), PPM and BMP decoders, a PPM encoder, resize/crop/pad/flip/contrast, the photo `Preprocessor` |
+| `crates/classifier/src/image/` | JPEG, PNG (with DEFLATE), PPM and BMP decoders, PNG and PPM encoders, resize/crop/pad/flip/contrast, the photo `Preprocessor` |
 | `crates/classifier/src/model.rs` | the default CNN and its options |
 | `crates/classifier/src/train.rs` | `TrainConfig` builder, multi-threaded training and evaluation |
 | `crates/classifier/src/ensemble.rs` | averaging several models |

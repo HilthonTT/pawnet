@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **PNG output:** `RgbImage::encode_png` and `RgbImage::save`, which picks PNG or PPM from the
+  file extension. Heat maps and `export-samples` now write PNG files that any viewer or browser
+  can open (`--explain map.ppm` and `export-samples --format ppm` still write PPM).
 - **JPEG support:** a from-scratch JPEG decoder for baseline and progressive files, with any
   chroma subsampling, restart markers, greyscale and CMYK. Photos are turned upright using their
   EXIF orientation.
@@ -45,6 +48,8 @@ All notable changes to this project are documented here. The format follows
 - `docs/usage.md` and a documentation index (`docs/README.md`).
 
 ### Changed
+- `predict --explain DIR` names its heat maps `<image>-heatmap.png` (was `.ppm`), and
+  `export-samples` writes `.png` files by default.
 - **Faster convolutions:** `Conv2d` now uses im2col and blocked matrix multiplication, and max
   pooling has a 2×2 fast path. A training step is about 4× faster and inference about 5× faster.
 - Model files are now format version 3, which stores non-trainable state (batch-norm running

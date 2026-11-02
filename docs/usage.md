@@ -52,12 +52,13 @@ cargo run --release -- predict photos/*.jpg --top 3 --json
 ### See what the model looks at
 
 ```bash
-cargo run --release -- predict dog.png --explain dog-heatmap.ppm
+cargo run --release -- predict dog.png --explain dog-heatmap.png
 cargo run --release -- predict photos/*.png --explain heatmaps/    # one map per image
 ```
 
-`--explain` writes a 256×256 heat map of the predicted class: the 32×32 image the network
-actually sees, with the pixels that pushed it towards its answer glowing orange to yellow.
+`--explain` writes a 256×256 heat map of the predicted class as a PNG (or a PPM if the file
+name ends in `.ppm`): the 32×32 image the network actually sees, with the pixels that pushed
+it towards its answer glowing orange to yellow.
 
 ![Test images (top) and their heat maps (bottom)](../assets/heatmaps.png)
 
@@ -88,8 +89,8 @@ ffmpeg -i my-dog.webp my-dog.png    # FFmpeg
 The network sees photos at only 32×32 pixels. You get the best results when the animal
 fills most of the frame. If the animal sits off-centre, try `--fit pad`.
 
-No photos at hand? `export-samples` writes test-set images as `.ppm` files (needs the
-dataset).
+No photos at hand? `export-samples` writes test-set images as `.png` files (needs the
+dataset; `--format ppm` for PPM).
 
 ## Train and evaluate
 
@@ -120,7 +121,7 @@ Every training option, recipes and reference results are in the [training guide]
 | `evaluate` | Accuracy, per-class precision and recall, and a confusion matrix |
 | `predict <IMAGE>…` | Classify `.jpg`, `.png`, `.ppm` or `.bmp` files |
 | `expand` | Write a 4× larger training set (flipped, shifted and rotated copies) |
-| `export-samples` | Write test-set images as `.ppm` files |
+| `export-samples` | Write test-set images as `.png` files |
 | `info` | Print the network architecture |
 
 Run `cargo run --release -- --help` for every option. Once installed with

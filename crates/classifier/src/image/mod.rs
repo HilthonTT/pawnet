@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::path::Path;
 
 use crate::error::{Error, Result};
@@ -38,6 +39,31 @@ impl RgbImage {
         let bytes = fs::read(path)
             .map_err(|e| Error::format(format!("cannot read {}: {e}", path.display())))?;
         Self::decode(&bytes).map_err(|e| Error::format(format!("{}: {e}", path.display())))
+    }
+
+    /// Writes the image to `path` as PNG or PPM, chosen by the file extension
+    /// (`.png`, or `.ppm`/`.pnm`).
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        let extension = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase());
+        let bytes = match extension.as_deref() {
+            Some("png") => self.encode_png(),
+            Some("ppm" | "pnm") => self.encode_ppm(),
+            _ => {
+                return Err(Error::format(format!(
+                    "cannot save {}: the file name must end in .png or .ppm",
+                    path.display()
+                )));
+            }
+        };
+        fs::write(path, bytes).map_err(|e| {
+            Error::Io(io::Error::new(
+                e.kind(),
+                format!("cannot write {}: {e}", path.display()),
+            ))
+        })
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
@@ -219,6 +245,27 @@ mod tests {
         let stretched = RgbImage::new(10, 10, pixels).auto_contrast();
         assert_eq!(*stretched.pixels.iter().min().unwrap(), 0);
         assert_eq!(*stretched.pixels.iter().max().unwrap(), 255);
+    }
+
+    #[test]
+    fn saves_by_extension() {
+        let dir = std::env::temp_dir().join(format!("pawnet-save-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let img = sample();
+        for name in ["a.png", "b.PNG", "c.ppm"] {
+            let path = dir.join(name);
+            img.save(&path).unwrap();
+            assert_eq!(RgbImage::load(&path).unwrap(), img, "{name}");
+        }
+        assert!(
+            fs::read(dir.join("a.png"))
+                .unwrap()
+                .starts_with(&png::SIGNATURE)
+        );
+        assert!(fs::read(dir.join("c.ppm")).unwrap().starts_with(b"P6"));
+        assert!(img.save(dir.join("d.jpg")).is_err());
+        assert!(img.save(dir.join("noextension")).is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
