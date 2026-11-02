@@ -48,7 +48,7 @@ corrupt model behind.
 | `--limit N` | train on only the first N images | all |
 | `--seed N` | make a run reproducible | random |
 | `--resume` | continue training the model at `--model` | off |
-| `--val FRACTION` | share of the training images held out to choose the best epoch; `0` chooses by test accuracy | 0.1 |
+| `--val FRACTION` | share of the training images held out to choose the best epoch; `0` chooses by test accuracy. The same images are held out whatever the `--seed`, so `--resume` never validates on images it trained on (keep `--val` and `--limit` unchanged) | 0.1 |
 | `--log FILE` | write one CSV row per epoch (see below) | off |
 | `--threads N` | CPU threads | all cores |
 

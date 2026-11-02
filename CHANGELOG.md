@@ -57,6 +57,8 @@ All notable changes to this project are documented here. The format follows
 - `LrSchedule::rate` takes the total number of epochs, and the `train::train` callback returns
   `ControlFlow` so it can stop training.
 - `Augment` gained colour and cutout fields and is no longer `Eq`.
+- The train/validation split uses a fixed seed of its own, so runs with different `--seed`
+  values hold out the same images, and a given seed trains a different model than before.
 - Training now runs each layer over a thread's whole sub-batch, so the same seed no longer
   reproduces models trained with 0.2.0 bit for bit.
 - Renamed the project to **Pawnet**: the crates are now `pawnet-nn`, `pawnet` and `pawnet-cli`,
@@ -69,6 +71,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - `expand` into a folder that held a larger expansion removes the leftover `data_batch_*.bin`
   files, which `train` would otherwise have loaded as extra training images.
+- The validation split no longer depends on `--seed`. A `train --resume` without the original
+  seed used to hold out a different 10%, mostly images the model had already trained on.
 - Saving a model writes a temporary file and renames it, so an interrupted save can no longer
   corrupt the previous model.
 - Model files with oversized layer shapes, or with no layers, are rejected with an error instead of crashing.

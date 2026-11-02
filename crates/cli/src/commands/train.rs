@@ -12,6 +12,9 @@ use pawnet::train::{self, EpochStats, TrainConfig};
 use super::{AppResult, DEFAULT_MODEL_PATH, dataset, time_seed};
 use crate::args::Options;
 
+/// Seed for the train/validation split, independent of `--seed`.
+const VALIDATION_SEED: u64 = 0x5EED_0F7A;
+
 pub fn run(opts: &Options) -> AppResult {
     opts.allow(&[
         "data",
@@ -119,7 +122,9 @@ pub fn run(opts: &Options) -> AppResult {
     }
     let mut rng = Rng::new(seed);
     let val_set = if val_fraction > 0.0 {
-        let (train, val) = train_set.split_validation(val_fraction, &mut rng);
+        // The split has its own fixed seed, so every run (including `--resume` with a new
+        // --seed) holds out the same images and never validates on ones it trained on.
+        let (train, val) = train_set.split_validation(val_fraction, &mut Rng::new(VALIDATION_SEED));
         if val.is_empty() {
             return Err("--val is too small: the validation set is empty".into());
         }
