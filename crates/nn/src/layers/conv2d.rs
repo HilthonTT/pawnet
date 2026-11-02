@@ -129,6 +129,8 @@ impl Conv2d {
         );
         let fits = checked_len(&[in_channels, in_h, in_w]).is_some()
             && checked_len(&[out_channels, out_h, out_w]).is_some()
+            // The im2col buffer: one kernel-sized patch per output position.
+            && checked_len(&[in_channels, kernel, kernel, out_h, out_w]).is_some()
             && checked_param_len(&[out_channels, in_channels, kernel, kernel], out_channels)
                 .is_some();
         if !fits {
@@ -465,5 +467,8 @@ mod tests {
     fn rejects_oversized_shapes() {
         assert!(Conv2d::from_config(&[u32::MAX, u32::MAX, u32::MAX, 1, 1, 0]).is_err());
         assert!(Conv2d::from_config(&[1, 4, 4, u32::MAX, u32::MAX, 0]).is_err());
+        // Input, output and weights are each about 10^6 values, but the im2col buffer
+        // (10^6 patch values × 10^6 positions) would need terabytes.
+        assert!(Conv2d::from_config(&[1, 1, 1, 1, 1000, 1000]).is_err());
     }
 }

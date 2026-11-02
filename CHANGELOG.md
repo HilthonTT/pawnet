@@ -76,6 +76,8 @@ All notable changes to this project are documented here. The format follows
 - Flags given a value are honoured: `--tta=false` or `--resume=no` now turn the flag off instead
   of on, and an unrecognised value such as `--json=maybe` is an error.
 - `--help` says which commands accept `--dataset`, `--data`, `--model` and `--threads`.
+- A model file whose convolution needs an enormous im2col buffer (e.g. a 1000×1000 kernel with
+  padding 1000 on a 1×1 input) is rejected on load instead of aborting the first prediction.
 - Saving a model writes a temporary file and renames it, so an interrupted save can no longer
   corrupt the previous model.
 - Model files with oversized layer shapes, or with no layers, are rejected with an error instead of crashing.
