@@ -71,15 +71,17 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - `expand` into a folder that held a larger expansion removes the leftover `data_batch_*.bin`
   files, which `train` would otherwise have loaded as extra training images.
-- The validation split no longer depends on `--seed`. A `train --resume` without the original
-  seed used to hold out a different 10%, mostly images the model had already trained on.
 - Flags given a value are honoured: `--tta=false` or `--resume=no` now turn the flag off instead
   of on, and an unrecognised value such as `--json=maybe` is an error.
-- `--help` says which commands accept `--dataset`, `--data`, `--model` and `--threads`.
+- The validation split no longer depends on `--seed`. A `train --resume` without the original
+  seed used to hold out a different 10%, mostly images the model had already trained on.
 - A model file whose convolution needs an enormous im2col buffer (e.g. a 1000×1000 kernel with
   padding 1000 on a 1×1 input) is rejected on load instead of aborting the first prediction.
 - JPEG: a scan stops once its data runs out instead of decoding padding bits for every
   remaining block, so a 66 KB file of empty scans decodes in 0.2 s instead of 36 s.
+- PNG: `tRNS` transparency is honoured. Transparent palette entries and colour-keyed grey or RGB
+  pixels become white like other transparent pixels, instead of showing their stored colour.
+- `--help` says which commands accept `--dataset`, `--data`, `--model` and `--threads`.
 - Saving a model writes a temporary file and renames it, so an interrupted save can no longer
   corrupt the previous model.
 - Model files with oversized layer shapes, or with no layers, are rejected with an error instead of crashing.

@@ -246,6 +246,10 @@ struct Converter<'a> {
     colour: u8,
     max: u32,
     palette: &'a [[u8; 3]],
+    /// tRNS for palette images: the alpha of each palette entry (missing entries are opaque).
+    palette_alpha: &'a [u8],
+    /// tRNS for grey (one sample) and RGB images: the colour that is fully transparent.
+    key: Option<[u32; 3]>,
 }
 
 impl Converter<'_> {
@@ -278,13 +282,16 @@ impl Converter<'_> {
         let base = x * self.channels;
         let s = |c: usize| self.sample(row, base + c);
         match self.colour {
+            0 if self.key.is_some_and(|k| k[0] == s(0)) => [255; 3],
             0 => [self.to_u8(s(0)); 3],
+            2 if self.key == Some([s(0), s(1), s(2)]) => [255; 3],
             2 => [self.to_u8(s(0)), self.to_u8(s(1)), self.to_u8(s(2))],
-            3 => self
-                .palette
-                .get(s(0) as usize)
-                .copied()
-                .unwrap_or([0, 0, 0]),
+            3 => {
+                let index = s(0) as usize;
+                let colour = self.palette.get(index).copied().unwrap_or([0, 0, 0]);
+                let alpha = self.palette_alpha.get(index).map_or(255, |&a| a as u32);
+                colour.map(|c| ((c as u32 * alpha + 255 * (255 - alpha) + 127) / 255) as u8)
+            }
             4 => [self.over_white(s(0), s(1)); 3],
             _ => {
                 let alpha = s(3);
@@ -308,6 +315,7 @@ impl RgbImage {
         let mut pos = SIGNATURE.len();
         let mut header: Option<Header> = None;
         let mut palette: Option<Vec<[u8; 3]>> = None;
+        let mut transparency: Option<Vec<u8>> = None;
         let mut idat = Vec::new();
         let mut seen_idat = false;
         loop {
@@ -330,6 +338,10 @@ impl RgbImage {
                         return Err(Error::format("PNG PLTE chunk has an invalid length"));
                     }
                     palette = Some(data.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect());
+                }
+                // Transparency is ancillary: a misplaced or duplicate tRNS is ignored.
+                b"tRNS" if !seen_idat && transparency.is_none() => {
+                    transparency = Some(data.to_vec());
                 }
                 b"IDAT" => {
                     seen_idat = true;
@@ -378,12 +390,26 @@ impl RgbImage {
             return Err(Error::format("PNG image data is truncated"));
         }
 
+        let transparency = transparency.unwrap_or_default();
+        let sample = |i: usize| u16::from_be_bytes([transparency[2 * i], transparency[2 * i + 1]]);
+        let key = match (header.colour, transparency.len()) {
+            (0, 2) => Some([sample(0) as u32; 3]),
+            (2, 6) => Some([sample(0), sample(1), sample(2)].map(u32::from)),
+            _ => None,
+        };
+        let palette_alpha = if header.colour == 3 {
+            &transparency[..transparency.len().min(palette.len())]
+        } else {
+            &[]
+        };
         let converter = Converter {
             depth: header.depth as usize,
             channels: header.channels(),
             colour: header.colour,
             max: (1u32 << header.depth) - 1,
             palette: &palette,
+            palette_alpha,
+            key,
         };
         let bpp = header.bits_per_pixel().div_ceil(8);
         let mut pixels = vec![0u8; pixel_count * 3];
@@ -622,8 +648,11 @@ mod tests {
                     0 => [scale(s[0], depth); 3],
                     2 => [scale(s[0], depth), scale(s[1], depth), scale(s[2], depth)],
                     3 => {
+                        // The tRNS chunk makes entry 0 transparent and entry 1 half opaque.
+                        let alpha = [0, 128].get(s[0] as usize).map_or(255, |&a| a as u16);
                         let p = s[0] as usize * 3;
                         [palette[p], palette[p + 1], palette[p + 2]]
+                            .map(|c| blend(c as u16, alpha, 8))
                     }
                     4 => [blend(s[0], s[1], depth); 3],
                     _ => [
@@ -863,5 +892,47 @@ mod tests {
             .collect();
         let img = RgbImage::new(width, height, pixels);
         assert_eq!(RgbImage::decode(&img.encode_png()).unwrap(), img);
+    }
+
+    /// An unfiltered, non-interlaced 8- or 16-bit PNG with an optional tRNS chunk.
+    fn simple_png(colour: u8, depth: u8, rows: &[&[u8]], trns: Option<&[u8]>) -> Vec<u8> {
+        let channels = if colour == 0 { 1 } else { 3 };
+        let width = rows[0].len() / channels / (depth as usize / 8);
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&(width as u32).to_be_bytes());
+        ihdr.extend_from_slice(&(rows.len() as u32).to_be_bytes());
+        ihdr.extend_from_slice(&[depth, colour, 0, 0, 0]);
+        let raw: Vec<u8> = rows.iter().flat_map(|r| [&[0][..], r].concat()).collect();
+        let mut png = SIGNATURE.to_vec();
+        chunk(&mut png, b"IHDR", &ihdr);
+        if let Some(trns) = trns {
+            chunk(&mut png, b"tRNS", trns);
+        }
+        chunk(&mut png, b"IDAT", &stored_zlib(&raw));
+        chunk(&mut png, b"IEND", &[]);
+        png
+    }
+
+    #[test]
+    fn colour_key_transparency_becomes_white() {
+        let grey = simple_png(0, 8, &[&[0, 7, 9]], Some(&[0, 7]));
+        assert_eq!(
+            RgbImage::decode(&grey).unwrap().pixels,
+            [0, 0, 0, 255, 255, 255, 9, 9, 9]
+        );
+        let rgb = simple_png(2, 8, &[&[0, 0, 0, 1, 2, 3]], Some(&[0, 0, 0, 0, 0, 0]));
+        assert_eq!(
+            RgbImage::decode(&rgb).unwrap().pixels,
+            [255, 255, 255, 1, 2, 3]
+        );
+        // 16-bit keys compare all 16 bits: 0x0100 is transparent, 0x0101 is not.
+        let wide = simple_png(0, 16, &[&[1, 0, 1, 1]], Some(&[1, 0]));
+        assert_eq!(
+            RgbImage::decode(&wide).unwrap().pixels,
+            [255, 255, 255, 1, 1, 1]
+        );
+        // A tRNS of the wrong length is ignored.
+        let bad = simple_png(2, 8, &[&[0, 0, 0]], Some(&[0, 0]));
+        assert_eq!(RgbImage::decode(&bad).unwrap().pixels, [0, 0, 0]);
     }
 }
