@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
   and `LrSchedule::check` validate every setting up front, and the new
   `Error::InvalidParameter` variant reports which one is out of range. `train::train` runs the
   check itself, and the CLI runs it before loading the dataset.
+- **More metrics:** `ConfusionMatrix::f1_score`, `macro_f1`, `macro_precision`, `macro_recall`
+  and `mcc` (multiclass Matthews correlation). `evaluate` prints a per-class F1 row, macro F1,
+  balanced accuracy and MCC.
 - `Network::is_finite` tells whether every parameter and buffer is finite.
 - **PNG output:** `RgbImage::encode_png` and `RgbImage::save`, which picks PNG or PPM from the
   file extension. Heat maps and `export-samples` now write PNG files that any viewer or browser

@@ -97,7 +97,7 @@ dataset; `--format ppm` for PPM).
 ```bash
 ./scripts/download_data.sh                 # ~163 MB (Windows: .\scripts\download_data.ps1)
 cargo run --release -- train               # ~10 minutes on an 8-core CPU
-cargo run --release -- evaluate --tta      # accuracy, per-class precision/recall, confusion matrix
+cargo run --release -- evaluate --tta      # accuracy, per-class precision/recall/F1, macro F1, MCC
 ```
 
 To train on all ten CIFAR-10 classes or on CIFAR-100 instead of the six animals:
@@ -118,7 +118,7 @@ Every training option, recipes and reference results are in the [training guide]
 | Command | Description |
 |---------|-------------|
 | `train` | Train a model; the best epoch (by validation accuracy) is saved |
-| `evaluate` | Accuracy, per-class precision and recall, and a confusion matrix |
+| `evaluate` | Accuracy, per-class precision, recall and F1, macro F1, Matthews correlation and a confusion matrix |
 | `predict <IMAGE>…` | Classify `.jpg`, `.png`, `.ppm` or `.bmp` files |
 | `expand` | Write a 4× larger training set (flipped, shifted and rotated copies) |
 | `export-samples` | Write test-set images as `.png` files |
