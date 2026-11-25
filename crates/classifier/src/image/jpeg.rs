@@ -371,7 +371,20 @@ impl Decoder {
         }
         let mcus_x = width.div_ceil(8 * h_max);
         let mcus_y = height.div_ceil(8 * v_max);
-        if mcus_x * mcus_y > remaining.saturating_mul(8) {
+        // Every block a scan codes takes at least one bit, so a file too short to hold one
+        // bit per block cannot be valid. Checking blocks rather than MCUs (which hold up to
+        // 64 blocks) stops a tiny file from allocating hundreds of megabytes.
+        let min_blocks: usize = components
+            .iter()
+            .map(|c| {
+                let (w, h) = (
+                    (width * c.h).div_ceil(h_max),
+                    (height * c.v).div_ceil(v_max),
+                );
+                w.div_ceil(8) * h.div_ceil(8)
+            })
+            .sum();
+        if min_blocks > remaining.saturating_mul(8) {
             return Err(truncated());
         }
         for c in &mut components {
@@ -1304,5 +1317,22 @@ mod tests {
             "took {:?}",
             start.elapsed()
         );
+    }
+
+    #[test]
+    fn rejects_a_tiny_file_that_declares_many_blocks() {
+        // 8192×8192 with four 4×4-sampled components is 65 536 MCUs but 4 million blocks
+        // (a 512 MB coefficient buffer). 9 KB is enough for one bit per MCU, which the old
+        // check counted, but nowhere near one bit per block.
+        let mut jpeg = vec![0xFF, 0xD8];
+        let mut sof = vec![8, 0x20, 0x00, 0x20, 0x00, 4];
+        for id in 1..=4 {
+            sof.extend_from_slice(&[id, 0x44, 0]);
+        }
+        marker(&mut jpeg, 0xC0, &sof);
+        jpeg.extend_from_slice(&[0; 9000]);
+        jpeg.extend_from_slice(&[0xFF, 0xD9]);
+        let err = RgbImage::decode(&jpeg).err().unwrap().to_string();
+        assert_eq!(err, "JPEG file is truncated");
     }
 }

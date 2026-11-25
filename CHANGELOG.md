@@ -83,6 +83,8 @@ All notable changes to this project are documented here. The format follows
   runs) made the decoder sweep every block of the image again for each scan: a 180 KB file
   took nearly three minutes to decode. Like libjpeg, the decoder now tracks which bits of each
   coefficient are already decoded and skips scans that repeat them or arrive out of order.
+- An 8 KB JPEG could make the decoder allocate about 0.5 GB of coefficients: the size check
+  counted MCUs, which hold up to 64 blocks each. It now counts blocks.
 - `train` saved a model full of NaN weights when the learning rate was NaN or training
   diverged. Training now stops with `Error::Diverged` as soon as the loss or weights stop
   being finite.
