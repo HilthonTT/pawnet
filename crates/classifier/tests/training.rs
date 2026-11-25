@@ -262,3 +262,28 @@ fn invalid_hyperparameters_are_rejected_before_training() {
         assert_eq!(net.to_bytes(), before, "the network must be left untouched");
     }
 }
+
+#[test]
+fn divergence_stops_training_before_a_broken_model_reaches_the_callback() {
+    let mut rng = Rng::new(12);
+    let data = colour_dataset(60, &mut rng);
+    let mut net = small_net(data.class_names.clone(), 0.0, &mut rng);
+    let config = quiet().epochs(5).learning_rate(1e30);
+    let mut optimizer = pawnet::nn::Sgd::new(config.learning_rate, 0.9);
+    let result = train::train(
+        &mut net,
+        &data,
+        &mut optimizer,
+        &config,
+        &mut rng,
+        |net, stats| {
+            assert!(net.is_finite() && stats.loss.is_finite());
+            Ok(ControlFlow::Continue(()))
+        },
+    );
+    assert!(
+        matches!(result, Err(pawnet::Error::Diverged(_))),
+        "{:?}",
+        result.err()
+    );
+}

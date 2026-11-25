@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows
   and `LrSchedule::check` validate every setting up front, and the new
   `Error::InvalidParameter` variant reports which one is out of range. `train::train` runs the
   check itself, and the CLI runs it before loading the dataset.
+- `Network::is_finite` tells whether every parameter and buffer is finite.
 - **PNG output:** `RgbImage::encode_png` and `RgbImage::save`, which picks PNG or PPM from the
   file extension. Heat maps and `export-samples` now write PNG files that any viewer or browser
   can open (`--explain map.ppm` and `export-samples --format ppm` still write PPM).
@@ -75,6 +76,9 @@ All notable changes to this project are documented here. The format follows
 - `Predictor` has a new required method, `logit_gradient`, used by the heat maps.
 
 ### Fixed
+- `train` saved a model full of NaN weights when the learning rate was NaN or training
+  diverged. Training now stops with `Error::Diverged` as soon as the loss or weights stop
+  being finite.
 - `train --mixup nan` (or `TrainConfig::mixup(f32::NAN)`) hung forever in the Beta sampler.
   `Rng::gamma` now panics on a shape that is not finite and positive, and the config check
   rejects it first.

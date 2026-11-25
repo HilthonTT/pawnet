@@ -9,6 +9,8 @@ pub enum Error {
     Format(String),
     /// A hyperparameter is out of range, e.g. a negative learning rate.
     InvalidParameter(String),
+    /// Training produced a non-finite loss, so the weights can no longer be trusted.
+    Diverged(String),
 }
 
 impl Error {
@@ -25,7 +27,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Io(e) => write!(f, "{e}"),
-            Error::Format(message) | Error::InvalidParameter(message) => f.write_str(message),
+            Error::Format(message)
+            | Error::InvalidParameter(message)
+            | Error::Diverged(message) => f.write_str(message),
         }
     }
 }
@@ -34,7 +38,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Io(e) => Some(e),
-            Error::Format(_) | Error::InvalidParameter(_) => None,
+            Error::Format(_) | Error::InvalidParameter(_) | Error::Diverged(_) => None,
         }
     }
 }

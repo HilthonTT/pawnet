@@ -75,7 +75,9 @@ to stop early.
 Before the first epoch, `train::train` calls `TrainConfig::check`, so an out-of-range value
 (a negative or NaN learning rate, a batch size of 0, an invalid schedule, …) returns
 `Error::InvalidParameter` instead of training a broken model. `ModelOptions::check` does the
-same for the architecture, and `model::pawnet_cnn` returns a `Result`.
+same for the architecture, and `model::pawnet_cnn` returns a `Result`. If the loss or weights
+stop being finite during training, `train::train` returns `Error::Diverged` before the network
+reaches your closure, so a diverged model is never saved.
 
 ## Training logs
 

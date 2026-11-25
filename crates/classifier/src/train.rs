@@ -222,6 +222,9 @@ where
             let seeds: Vec<u64> = (0..threads).map(|_| rng.next_u64()).collect();
             let (mut grads, buffers, loss, correct) =
                 batch_gradients(net, data, batch, &seeds, config);
+            if !loss.is_finite() {
+                return Err(diverged(epoch + 1, b + 1, config.verbose));
+            }
             net.set_buffers(&buffers);
             if config.l2 > 0.0 {
                 net.add_weight_decay(&mut grads, config.l2);
@@ -245,9 +248,13 @@ where
             }
         }
         if config.verbose {
-            eprint!("\r{:80}\r", "");
+            clear_progress();
         }
 
+        // A NaN loss is caught above, but the last update of an epoch can still overflow.
+        if !net.is_finite() {
+            return Err(diverged(epoch + 1, batches, false));
+        }
         let stats = EpochStats {
             epoch: epoch + 1,
             loss: (total_loss / seen as f64) as f32,
@@ -260,6 +267,16 @@ where
         }
     }
     Ok(())
+}
+
+fn diverged(epoch: usize, batch: usize, clear: bool) -> Error {
+    if clear {
+        clear_progress();
+    }
+    Error::Diverged(format!(
+        "training diverged in epoch {epoch}, batch {batch}: the loss or weights are no longer \
+         finite (try a lower learning rate or gradient clipping)"
+    ))
 }
 
 type BatchResult = (Vec<Vec<f32>>, Vec<Vec<f32>>, f32, usize);
@@ -408,6 +425,10 @@ pub fn evaluate<P: Predictor + ?Sized>(
         matrix.merge(partial);
     }
     matrix
+}
+
+fn clear_progress() {
+    eprint!("\r{:80}\r", "");
 }
 
 struct Progress {

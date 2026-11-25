@@ -117,6 +117,14 @@ impl Network {
         softmax(&self.forward(input))
     }
 
+    /// Whether every parameter and buffer (e.g. batch-norm statistics) is finite. A network
+    /// that fails this check has diverged and will only ever predict garbage.
+    pub fn is_finite(&self) -> bool {
+        self.layers
+            .iter()
+            .all(|l| l.params().iter().chain(l.buffers()).all(|v| v.is_finite()))
+    }
+
     /// Zeroed gradient buffers, one per layer, shaped like the parameters.
     pub fn zero_grads(&self) -> Vec<Vec<f32>> {
         self.layers
