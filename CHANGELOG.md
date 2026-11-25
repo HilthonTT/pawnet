@@ -79,6 +79,10 @@ All notable changes to this project are documented here. The format follows
 - `Predictor` has a new required method, `logit_gradient`, used by the heat maps.
 
 ### Fixed
+- A crafted progressive JPEG of repeated refinement scans (about 40 bytes each, thanks to EOB
+  runs) made the decoder sweep every block of the image again for each scan: a 180 KB file
+  took nearly three minutes to decode. Like libjpeg, the decoder now tracks which bits of each
+  coefficient are already decoded and skips scans that repeat them or arrive out of order.
 - `train` saved a model full of NaN weights when the learning rate was NaN or training
   diverged. Training now stops with `Error::Diverged` as soon as the loss or weights stop
   being finite.

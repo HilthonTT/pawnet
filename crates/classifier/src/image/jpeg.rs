@@ -205,6 +205,9 @@ struct Component {
     height: usize,
     coeffs: Vec<i16>,
     dc_pred: i32,
+    /// Progressive mode: the lowest bit already decoded for each coefficient index
+    /// (`-1` = none yet), like libjpeg's `coef_bits`.
+    coef_bits: [i8; 64],
 }
 
 impl Component {
@@ -355,6 +358,7 @@ impl Decoder {
                 height: 0,
                 coeffs: Vec::new(),
                 dc_pred: 0,
+                coef_bits: [-1; 64],
             });
         }
         let h_max = components.iter().map(|c| c.h).max().unwrap_or(1);
@@ -470,6 +474,13 @@ impl Decoder {
         pos: usize,
         scan: &Scan,
     ) -> Result<usize> {
+        if frame.progressive && !Self::advances(frame, scan) {
+            // A scan that repeats bits already decoded, or refines bits that were never
+            // sent, cannot add anything. Decoding it anyway let a file of repeated
+            // refinement scans (each a few bytes long thanks to EOB runs) sweep every
+            // block of a large image again and again, for minutes.
+            return Ok(next_marker(bytes, pos));
+        }
         let mut tables = Vec::with_capacity(scan.components.len());
         for &(_, dc, ac) in &scan.components {
             let needs_dc = scan.start == 0 && scan.high == 0;
@@ -533,6 +544,29 @@ impl Decoder {
             }
         }
         Ok(next_marker(bytes, reader.pos))
+    }
+
+    /// Whether a progressive scan follows on from the scans before it, and if so records the
+    /// bits it decodes.
+    fn advances(frame: &mut Frame, scan: &Scan) -> bool {
+        let range = scan.start..=scan.end;
+        let fits = scan.components.iter().all(|&(i, _, _)| {
+            frame.components[i].coef_bits[range.clone()]
+                .iter()
+                .all(|&bits| {
+                    if scan.high == 0 {
+                        bits == -1
+                    } else {
+                        bits == scan.high as i8 && scan.low + 1 == scan.high
+                    }
+                })
+        });
+        if fits {
+            for &(i, _, _) in &scan.components {
+                frame.components[i].coef_bits[range.clone()].fill(scan.low as i8);
+            }
+        }
+        fits
     }
 
     fn read_exif(&mut self, data: &[u8]) {
@@ -1214,6 +1248,59 @@ mod tests {
         assert_eq!((image.width, image.height), (4096, 2048));
         assert!(
             start.elapsed() < std::time::Duration::from_secs(20),
+            "took {:?}",
+            start.elapsed()
+        );
+    }
+
+    /// A progressive greyscale `side`×`side` frame with one AC table whose only symbol,
+    /// 0xE0 (an EOB run of 2¹⁴ + extra bits), has a 1-bit code, followed by `scans` copies of
+    /// an AC refinement scan made of maximal EOB runs.
+    fn repeated_refinement_scans(side: u16, scans: usize) -> Vec<u8> {
+        let mut jpeg = vec![0xFF, 0xD8];
+        let mut dqt = vec![0];
+        dqt.extend_from_slice(&[1; 64]);
+        marker(&mut jpeg, 0xDB, &dqt);
+        let [hi, lo] = side.to_be_bytes();
+        marker(&mut jpeg, 0xC2, &[8, hi, lo, hi, lo, 1, 1, 0x11, 0]);
+        let mut dht = vec![0x10, 1];
+        dht.extend_from_slice(&[0; 15]);
+        dht.push(0xE0);
+        marker(&mut jpeg, 0xC4, &dht);
+        let blocks = (side as usize / 8).pow(2);
+        // Each run: code `0`, then 14 one-bits (a run of 32 767 blocks).
+        let mut bits: Vec<bool> = (0..blocks.div_ceil(32_767))
+            .flat_map(|_| std::iter::once(false).chain(std::iter::repeat_n(true, 14)))
+            .collect();
+        while bits.len() % 8 != 0 {
+            bits.push(true);
+        }
+        let mut body = Vec::new();
+        for byte in bits.chunks(8) {
+            let b = byte.iter().fold(0u8, |acc, &bit| acc << 1 | u8::from(bit));
+            body.push(b);
+            if b == 0xFF {
+                body.push(0);
+            }
+        }
+        for _ in 0..scans {
+            marker(&mut jpeg, 0xDA, &[1, 1, 0x00, 1, 63, 0x10]);
+            jpeg.extend_from_slice(&body);
+        }
+        jpeg.extend_from_slice(&[0xFF, 0xD9]);
+        jpeg
+    }
+
+    #[test]
+    fn repeated_progressive_scans_are_skipped() {
+        // 262 144 blocks; each scan is ~40 bytes but used to visit every block's 63 AC
+        // coefficients, so this ~40 KB file took about half a minute to decode.
+        let jpeg = repeated_refinement_scans(4096, 1000);
+        let start = std::time::Instant::now();
+        let image = RgbImage::decode(&jpeg).unwrap();
+        assert_eq!((image.width, image.height), (4096, 4096));
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
             "took {:?}",
             start.elapsed()
         );
