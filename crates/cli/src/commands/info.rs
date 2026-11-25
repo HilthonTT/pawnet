@@ -18,7 +18,7 @@ pub fn run(opts: &Options) -> AppResult {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let net = model::pawnet_cnn(&labels, &ModelOptions::default(), &mut Rng::new(0));
+        let net = model::pawnet_cnn(&labels, &ModelOptions::default(), &mut Rng::new(0))?;
         print!("{}", net.summary());
         return Ok(());
     }

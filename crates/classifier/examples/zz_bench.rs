@@ -5,7 +5,8 @@ use std::time::Instant;
 fn main() {
     let labels: Vec<String> = (0..6).map(|i| i.to_string()).collect();
     let mut rng = Rng::new(1);
-    let net = model::pawnet_cnn(&labels, &ModelOptions::default(), &mut rng);
+    let net = model::pawnet_cnn(&labels, &ModelOptions::default(), &mut rng)
+        .expect("default options are valid");
     let inputs: Vec<Vec<f32>> = (0..256)
         .map(|_| (0..3072).map(|_| rng.normal()).collect())
         .collect();

@@ -125,7 +125,8 @@ fn trains_a_residual_batch_norm_network() {
         dropout: 0.0,
         ..ModelOptions::default()
     };
-    let mut net = model::pawnet_cnn(&colour_dataset(1, &mut rng).class_names, &options, &mut rng);
+    let mut net =
+        model::pawnet_cnn(&colour_dataset(1, &mut rng).class_names, &options, &mut rng).unwrap();
     let before = net.buffers();
     let config = quiet().epochs(2).learning_rate(3e-3);
     let mut optimizer = RmsProp::new(config.learning_rate);
@@ -222,4 +223,42 @@ fn trained_model_survives_save_and_load() {
         train::evaluate(&net, &data, 1, false),
         train::evaluate(&loaded, &data, 1, false)
     );
+}
+
+#[test]
+fn invalid_hyperparameters_are_rejected_before_training() {
+    let mut rng = Rng::new(11);
+    let data = colour_dataset(30, &mut rng);
+    let bad_configs = [
+        quiet().learning_rate(f32::NAN),
+        quiet().learning_rate(-1e-3),
+        quiet().batch_size(0),
+        quiet().threads(0),
+        quiet().l2(f32::NAN),
+        quiet().gradient_clipping(0.0),
+        // A NaN mixup alpha used to make the Beta sampler loop forever.
+        quiet().mixup(f32::NAN),
+        quiet().color_jitter(2.0),
+        quiet().cutout(IMAGE_SIZE + 1),
+        quiet().schedule(LrSchedule::Exponential { decay: -1.0 }),
+    ];
+    for config in bad_configs {
+        let mut net = small_net(data.class_names.clone(), 0.0, &mut rng);
+        let before = net.to_bytes();
+        let mut optimizer = Adam::new(1e-3);
+        let result = train::train(
+            &mut net,
+            &data,
+            &mut optimizer,
+            &config,
+            &mut rng,
+            |_, _| panic!("no epoch should run with {config:?}"),
+        );
+        assert!(
+            matches!(result, Err(pawnet::Error::InvalidParameter(_))),
+            "{config:?} gave {:?}",
+            result.err()
+        );
+        assert_eq!(net.to_bytes(), before, "the network must be left untouched");
+    }
 }

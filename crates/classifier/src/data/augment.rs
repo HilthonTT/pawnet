@@ -1,4 +1,5 @@
 use super::{CHANNELS, IMAGE_LEN, IMAGE_SIZE};
+use crate::error::{Error, Result};
 use crate::nn::Rng;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,8 +35,29 @@ impl Default for Augment {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AugmentOptions {
+    /// Maximum relative change of brightness, contrast and saturation, in `[0, 1]`.
     pub color_jitter: f32,
+    /// Side of the square blanked by cutout, in pixels (0 = off, at most the image size).
     pub cutout: usize,
+}
+
+impl AugmentOptions {
+    /// Checks that every option is in range.
+    pub fn check(&self) -> Result<()> {
+        if !(0.0..=1.0).contains(&self.color_jitter) {
+            return Err(Error::invalid_parameter(format!(
+                "colour jitter must be in [0, 1], got {}",
+                self.color_jitter
+            )));
+        }
+        if self.cutout > IMAGE_SIZE {
+            return Err(Error::invalid_parameter(format!(
+                "cutout must be at most the image size ({IMAGE_SIZE}), got {}",
+                self.cutout
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Augment {
@@ -171,6 +193,27 @@ mod tests {
                 assert!((0.6..=1.4).contains(&f), "{f}");
             }
             assert_eq!(a.cutout.map(|c| c.size), Some(8));
+        }
+    }
+
+    #[test]
+    fn options_are_checked() {
+        assert!(AugmentOptions::default().check().is_ok());
+        for bad in [
+            AugmentOptions {
+                color_jitter: f32::NAN,
+                cutout: 0,
+            },
+            AugmentOptions {
+                color_jitter: 1.5,
+                cutout: 0,
+            },
+            AugmentOptions {
+                color_jitter: 0.0,
+                cutout: IMAGE_SIZE + 1,
+            },
+        ] {
+            assert!(bad.check().is_err(), "{bad:?}");
         }
     }
 

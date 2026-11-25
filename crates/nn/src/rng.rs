@@ -34,7 +34,16 @@ impl Rng {
         (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
     }
 
+    /// Sample from the Gamma(`shape`, 1) distribution (Marsaglia & Tsang, 2000).
+    ///
+    /// # Panics
+    ///
+    /// If `shape` is not a finite positive number; the rejection loop would never end.
     pub fn gamma(&mut self, shape: f32) -> f32 {
+        assert!(
+            shape.is_finite() && shape > 0.0,
+            "gamma shape must be a finite positive number, got {shape}"
+        );
         if shape < 1.0 {
             let u = 1.0 - self.next_f32();
             return self.gamma(shape + 1.0) * u.powf(1.0 / shape);
@@ -54,6 +63,7 @@ impl Rng {
         }
     }
 
+    /// Sample from the Beta(`a`, `b`) distribution. Both must be finite and positive.
     pub fn beta(&mut self, a: f32, b: f32) -> f32 {
         let x = self.gamma(a);
         let y = self.gamma(b);
@@ -115,6 +125,12 @@ mod tests {
                 "Beta({a}, {b}) mean {mean}"
             );
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "finite positive")]
+    fn gamma_rejects_a_nan_shape_instead_of_looping_forever() {
+        Rng::new(1).gamma(f32::NAN);
     }
 
     #[test]

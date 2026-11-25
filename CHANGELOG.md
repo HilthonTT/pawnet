@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Hyperparameter checks:** `TrainConfig::check`, `ModelOptions::check`, `AugmentOptions::check`
+  and `LrSchedule::check` validate every setting up front, and the new
+  `Error::InvalidParameter` variant reports which one is out of range. `train::train` runs the
+  check itself, and the CLI runs it before loading the dataset.
 - **PNG output:** `RgbImage::encode_png` and `RgbImage::save`, which picks PNG or PPM from the
   file extension. Heat maps and `export-samples` now write PNG files that any viewer or browser
   can open (`--explain map.ppm` and `export-samples --format ppm` still write PPM).
@@ -48,6 +52,8 @@ All notable changes to this project are documented here. The format follows
 - `docs/usage.md` and a documentation index (`docs/README.md`).
 
 ### Changed
+- **Breaking:** `model::pawnet_cnn` returns `Result<Network>` instead of panicking on invalid
+  options. `pawnet::Error` and `pawnet_nn::Error` are `#[non_exhaustive]`.
 - `predict --explain DIR` names its heat maps `<image>-heatmap.png` (was `.ppm`), and
   `export-samples` writes `.png` files by default.
 - **Faster convolutions:** `Conv2d` now uses im2col and blocked matrix multiplication, and max
@@ -69,6 +75,13 @@ All notable changes to this project are documented here. The format follows
 - `Predictor` has a new required method, `logit_gradient`, used by the heat maps.
 
 ### Fixed
+- `train --mixup nan` (or `TrainConfig::mixup(f32::NAN)`) hung forever in the Beta sampler.
+  `Rng::gamma` now panics on a shape that is not finite and positive, and the config check
+  rejects it first.
+- `train` silently accepted a negative or NaN `--lr`, `--l2` or `--weight-decay`, a
+  `--batch-size` or `--threads` of 0 (quietly treated as 1), schedules such as `exp:-1`
+  (alternating-sign learning rate) or `step:0.5:0`, and a `--cutout` larger than the image.
+  All of these are now errors, and an unknown `--optimizer` is reported before the dataset loads.
 - `expand` into a folder that held a larger expansion removes the leftover `data_batch_*.bin`
   files, which `train` would otherwise have loaded as extra training images.
 - Flags given a value are honoured: `--tta=false` or `--resume=no` now turn the flag off instead

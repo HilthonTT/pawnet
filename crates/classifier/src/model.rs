@@ -2,6 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::data::{CHANNELS, IMAGE_SIZE};
+use crate::error::{Error, Result};
 use crate::nn::{
     Activation, ActivationFn, AvgPool2d, BatchNorm, Conv2d, Dense, Dropout, GlobalAvgPool, Init,
     MaxPool2d, Network, Residual, Rng,
@@ -28,7 +29,7 @@ impl fmt::Display for Pool {
 impl FromStr for Pool {
     type Err = String;
 
-    fn from_str(s: &str) -> Result<Self, String> {
+    fn from_str(s: &str) -> std::result::Result<Self, String> {
         match s.to_ascii_lowercase().as_str() {
             "max" => Ok(Pool::Max),
             "avg" | "average" => Ok(Pool::Avg),
@@ -67,7 +68,32 @@ impl Default for ModelOptions {
     }
 }
 
-pub fn pawnet_cnn(labels: &[String], options: &ModelOptions, rng: &mut Rng) -> Network {
+impl ModelOptions {
+    /// Checks that every option is in range, so that [`pawnet_cnn`] can build the network.
+    pub fn check(&self) -> Result<()> {
+        if !(0.0..1.0).contains(&self.dropout) {
+            return Err(Error::invalid_parameter(format!(
+                "dropout must be in [0, 1), got {}",
+                self.dropout
+            )));
+        }
+        // The last stage has 4 × width filters.
+        if self.width == 0 || self.width.checked_mul(4).is_none() {
+            return Err(Error::invalid_parameter(format!(
+                "width must be at least 1, got {}",
+                self.width
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Builds the pawnet CNN for `labels.len()` classes, after checking `options`.
+pub fn pawnet_cnn(labels: &[String], options: &ModelOptions, rng: &mut Rng) -> Result<Network> {
+    options.check()?;
+    if labels.is_empty() {
+        return Err(Error::invalid_parameter("a model needs at least one class"));
+    }
     let ModelOptions {
         activation,
         init,
@@ -142,7 +168,7 @@ pub fn pawnet_cnn(labels: &[String], options: &ModelOptions, rng: &mut Rng) -> N
         net.push(Dropout::new(features, dropout));
     }
     net.push(Dense::with_init(features, labels.len(), init, rng));
-    net
+    Ok(net)
 }
 
 #[cfg(test)]
@@ -157,7 +183,7 @@ mod tests {
     #[test]
     fn builds_with_every_option() {
         let labels = labels();
-        let default = pawnet_cnn(&labels, &ModelOptions::default(), &mut Rng::new(1));
+        let default = pawnet_cnn(&labels, &ModelOptions::default(), &mut Rng::new(1)).unwrap();
         assert_eq!(default.output_len(), 3);
         assert_eq!(default.param_count(), 155_171);
 
@@ -168,7 +194,7 @@ mod tests {
             width: 8,
             ..ModelOptions::default()
         };
-        let small = pawnet_cnn(&labels, &options, &mut Rng::new(1));
+        let small = pawnet_cnn(&labels, &options, &mut Rng::new(1)).unwrap();
         assert_eq!(small.layers().len(), default.layers().len() - 1);
         assert!(small.param_count() < default.param_count());
     }
@@ -182,7 +208,7 @@ mod tests {
             global_pool: true,
             ..ModelOptions::default()
         };
-        let net = pawnet_cnn(&labels(), &options, &mut Rng::new(1));
+        let net = pawnet_cnn(&labels(), &options, &mut Rng::new(1)).unwrap();
         let count = |kind| net.layers().iter().filter(|l| l.kind() == kind).count();
         assert_eq!(count(LayerKind::Conv2d), 9);
         assert_eq!(count(LayerKind::BatchNorm), 9);
@@ -202,7 +228,7 @@ mod tests {
             batch_norm: true,
             ..ModelOptions::default()
         };
-        let net = pawnet_cnn(&labels(), &options, &mut Rng::new(1));
+        let net = pawnet_cnn(&labels(), &options, &mut Rng::new(1)).unwrap();
         let count = |kind| net.layers().iter().filter(|l| l.kind() == kind).count();
         assert_eq!(count(LayerKind::Conv2d), 6);
         assert_eq!(count(LayerKind::MaxPool2d), 0);
@@ -211,6 +237,31 @@ mod tests {
         let restored = Network::from_bytes(&net.to_bytes()).unwrap();
         let input = vec![0.25; net.input_len()];
         assert_eq!(restored.predict(&input), net.predict(&input));
+    }
+
+    #[test]
+    fn rejects_invalid_options_instead_of_panicking() {
+        let mut rng = Rng::new(1);
+        for options in [
+            ModelOptions {
+                width: 0,
+                ..ModelOptions::default()
+            },
+            ModelOptions {
+                dropout: 1.0,
+                ..ModelOptions::default()
+            },
+            ModelOptions {
+                dropout: f32::NAN,
+                ..ModelOptions::default()
+            },
+        ] {
+            assert!(
+                pawnet_cnn(&labels(), &options, &mut rng).is_err(),
+                "{options:?}"
+            );
+        }
+        assert!(pawnet_cnn(&[], &ModelOptions::default(), &mut rng).is_err());
     }
 
     #[test]

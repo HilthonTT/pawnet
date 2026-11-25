@@ -1,26 +1,20 @@
 use std::fmt;
 use std::str::FromStr;
 
+use crate::error::{Error, Result};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LrSchedule {
     /// The learning rate never changes.
     Constant,
     /// `lr = base · decayᵉᵖᵒᶜʰ`
-    Exponential {
-        decay: f32,
-    },
+    Exponential { decay: f32 },
     /// `lr = base · factor^⌊epoch / every⌋`: drops by `factor` every `every` epochs.
-    Step {
-        factor: f32,
-        every: usize,
-    },
+    Step { factor: f32, every: usize },
     /// `lr = base / (1 + decay · epoch)`
-    TimeBased {
-        decay: f32,
-    },
-    Cosine {
-        min: f32,
-    },
+    TimeBased { decay: f32 },
+    /// Half a cosine wave from `base` down to `base · min` over the run.
+    Cosine { min: f32 },
 }
 
 impl Default for LrSchedule {
@@ -30,6 +24,26 @@ impl Default for LrSchedule {
 }
 
 impl LrSchedule {
+    /// Checks that the schedule's parameters keep the learning rate finite and positive.
+    pub fn check(&self) -> Result<()> {
+        let positive = |v: f32| v.is_finite() && v > 0.0;
+        let valid = match *self {
+            LrSchedule::Constant => true,
+            LrSchedule::Exponential { decay } => positive(decay),
+            LrSchedule::Step { factor, every } => positive(factor) && every > 0,
+            LrSchedule::TimeBased { decay } => decay.is_finite() && decay >= 0.0,
+            LrSchedule::Cosine { min } => (0.0..=1.0).contains(&min),
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::invalid_parameter(format!(
+                "invalid schedule `{self}`: decay factors must be positive, the step interval \
+                 at least 1 and the cosine floor in [0, 1]"
+            )))
+        }
+    }
+
     pub fn rate(&self, base: f32, epoch: usize, epochs: usize) -> f32 {
         match *self {
             LrSchedule::Constant => base,
@@ -62,8 +76,9 @@ impl fmt::Display for LrSchedule {
 impl FromStr for LrSchedule {
     type Err = String;
 
-    /// Parses `constant`, `exp:<decay>`, `step:<factor>:<every>` or `time:<decay>`.
-    fn from_str(s: &str) -> Result<Self, String> {
+    /// Parses `constant`, `exp:<decay>`, `step:<factor>:<every>`, `time:<decay>`, `cosine` or
+    /// `cosine:<min>`, rejecting values that [`LrSchedule::check`] would.
+    fn from_str(s: &str) -> std::result::Result<Self, String> {
         let err = || {
             format!(
                 "invalid schedule `{s}` (expected constant, exp:0.9, step:0.5:5, time:0.1 or cosine)"
@@ -76,21 +91,23 @@ impl FromStr for LrSchedule {
                 .and_then(|p| p.parse::<f32>().ok())
                 .ok_or_else(err)
         };
-        match parts[0] {
-            "constant" if parts.len() == 1 => Ok(LrSchedule::Constant),
-            "exp" if parts.len() == 2 => Ok(LrSchedule::Exponential { decay: num(1)? }),
-            "time" if parts.len() == 2 => Ok(LrSchedule::TimeBased { decay: num(1)? }),
-            "cosine" if parts.len() == 1 => Ok(LrSchedule::Cosine { min: 0.0 }),
-            "cosine" if parts.len() == 2 => Ok(LrSchedule::Cosine { min: num(1)? }),
+        let schedule = match parts[0] {
+            "constant" if parts.len() == 1 => LrSchedule::Constant,
+            "exp" if parts.len() == 2 => LrSchedule::Exponential { decay: num(1)? },
+            "time" if parts.len() == 2 => LrSchedule::TimeBased { decay: num(1)? },
+            "cosine" if parts.len() == 1 => LrSchedule::Cosine { min: 0.0 },
+            "cosine" if parts.len() == 2 => LrSchedule::Cosine { min: num(1)? },
             "step" if parts.len() == 3 => {
                 let every = parts[2].parse().map_err(|_| err())?;
-                Ok(LrSchedule::Step {
+                LrSchedule::Step {
                     factor: num(1)?,
                     every,
-                })
+                }
             }
-            _ => Err(err()),
-        }
+            _ => return Err(err()),
+        };
+        schedule.check().map_err(|e| e.to_string())?;
+        Ok(schedule)
     }
 }
 
@@ -130,5 +147,31 @@ mod tests {
         }
         assert!("step:0.5".parse::<LrSchedule>().is_err());
         assert!("exp:abc".parse::<LrSchedule>().is_err());
+    }
+
+    #[test]
+    fn rejects_schedules_that_break_the_learning_rate() {
+        for text in [
+            "exp:-1",
+            "exp:0",
+            "exp:nan",
+            "step:0.5:0",
+            "step:-0.5:2",
+            "time:-1",
+            "time:inf",
+            "cosine:2",
+            "cosine:-0.1",
+        ] {
+            assert!(text.parse::<LrSchedule>().is_err(), "{text} was accepted");
+        }
+        assert!(
+            LrSchedule::Step {
+                factor: 0.5,
+                every: 0
+            }
+            .check()
+            .is_err()
+        );
+        assert!(LrSchedule::default().check().is_ok());
     }
 }

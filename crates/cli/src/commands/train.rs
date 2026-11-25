@@ -15,6 +15,8 @@ use crate::args::Options;
 /// Seed for the train/validation split, independent of `--seed`.
 const VALIDATION_SEED: u64 = 0x5EED_0F7A;
 
+const OPTIMIZERS: [&str; 4] = ["adam", "adamw", "sgd", "rmsprop"];
+
 pub fn run(opts: &Options) -> AppResult {
     opts.allow(&[
         "data",
@@ -82,21 +84,9 @@ pub fn run(opts: &Options) -> AppResult {
         pool: opts.get("pool", model_defaults.pool)?,
         global_pool: opts.flag("global-pool"),
     };
-    if !(0.0..1.0).contains(&model_options.dropout) || model_options.width == 0 {
-        return Err("--dropout must be in [0, 1) and --width at least 1".into());
-    }
-    if config
-        .gradient_clipping
-        .is_some_and(|c| !(c.is_finite() && c > 0.0))
-    {
-        return Err("--clip must be a positive number".into());
-    }
-    if !(0.0..=1.0).contains(&config.augmentation.color_jitter) {
-        return Err("--jitter must be in [0, 1]".into());
-    }
-    if !(config.mixup >= 0.0 && config.mixup.is_finite()) {
-        return Err("--mixup must be zero or a positive number".into());
-    }
+    // Check everything before the (slow) dataset load, so a typo fails immediately.
+    config.check()?;
+    model_options.check()?;
     let patience: Option<usize> = opts.get_opt("patience")?;
     if patience == Some(0) {
         return Err("--patience must be at least 1".into());
@@ -107,6 +97,15 @@ pub fn run(opts: &Options) -> AppResult {
         return Err(
             "--weight-decay only applies to --optimizer adamw (use --l2 with the others)".into(),
         );
+    }
+    if !(weight_decay.is_finite() && weight_decay >= 0.0) {
+        return Err("--weight-decay must be zero or a positive number".into());
+    }
+    if !OPTIMIZERS.contains(&optimizer_name.as_str()) {
+        return Err(format!(
+            "unknown optimizer `{optimizer_name}` (expected adam, adamw, sgd or rmsprop)"
+        )
+        .into());
     }
     let val_fraction: f32 = opts.get("val", 0.1)?;
     if !(0.0..1.0).contains(&val_fraction) {
@@ -163,7 +162,7 @@ pub fn run(opts: &Options) -> AppResult {
         println!("Resuming from {}", model_path.display());
         Network::load(&model_path)?
     } else {
-        model::pawnet_cnn(&train_set.class_names, &model_options, &mut rng)
+        model::pawnet_cnn(&train_set.class_names, &model_options, &mut rng)?
     };
     if net.labels() != train_set.class_names.as_slice() {
         return Err("the model was trained on different classes than this dataset".into());
@@ -175,12 +174,7 @@ pub fn run(opts: &Options) -> AppResult {
         "adamw" => Box::new(AdamW::new(config.learning_rate, weight_decay)),
         "sgd" => Box::new(Sgd::new(config.learning_rate, 0.9)),
         "rmsprop" => Box::new(RmsProp::new(config.learning_rate)),
-        other => {
-            return Err(format!(
-                "unknown optimizer `{other}` (expected adam, adamw, sgd or rmsprop)"
-            )
-            .into());
-        }
+        _ => unreachable!("optimizer names are checked above"),
     };
     let clip = config
         .gradient_clipping

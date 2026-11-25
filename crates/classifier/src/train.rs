@@ -125,6 +125,48 @@ impl TrainConfig {
     }
 }
 
+impl TrainConfig {
+    /// Checks that every hyperparameter is in range, so that training cannot silently
+    /// produce NaN weights or hang. [`train`] calls this before it starts.
+    pub fn check(&self) -> Result<()> {
+        let fail = |message: String| Err(Error::invalid_parameter(message));
+        if self.batch_size == 0 {
+            return fail("batch size must be at least 1".into());
+        }
+        if self.threads == 0 {
+            return fail("thread count must be at least 1".into());
+        }
+        if !(self.learning_rate.is_finite() && self.learning_rate > 0.0) {
+            return fail(format!(
+                "learning rate must be a positive number, got {}",
+                self.learning_rate
+            ));
+        }
+        if !(self.l2.is_finite() && self.l2 >= 0.0) {
+            return fail(format!(
+                "L2 regularisation must be zero or positive, got {}",
+                self.l2
+            ));
+        }
+        if let Some(max_norm) = self
+            .gradient_clipping
+            .filter(|n| !(n.is_finite() && *n > 0.0))
+        {
+            return fail(format!(
+                "gradient clipping norm must be a positive number, got {max_norm}"
+            ));
+        }
+        if !(self.mixup.is_finite() && self.mixup >= 0.0) {
+            return fail(format!(
+                "mixup alpha must be zero or a positive number, got {}",
+                self.mixup
+            ));
+        }
+        self.schedule.check()?;
+        self.augmentation.check()
+    }
+}
+
 pub fn default_threads() -> usize {
     thread::available_parallelism().map_or(1, |n| n.get())
 }
@@ -149,14 +191,14 @@ pub fn train<F>(
 where
     F: FnMut(&Network, &EpochStats) -> Result<ControlFlow<()>>,
 {
+    config.check()?;
     if data.is_empty() {
         return Err(Error::format("training set is empty"));
     }
     if net.labels().len() != data.class_names.len() || net.input_len() != IMAGE_LEN {
         return Err(Error::format("the network does not fit this dataset"));
     }
-    let batch_size = config.batch_size.max(1);
-    let threads = config.threads.max(1);
+    let (batch_size, threads) = (config.batch_size, config.threads);
     let mut order: Vec<usize> = (0..data.len()).collect();
     let batches = order.len().div_ceil(batch_size);
     let warmup_steps = config.warmup * batches;

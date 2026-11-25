@@ -72,6 +72,11 @@ let config = TrainConfig::new()
 `train::train` calls your closure after every epoch; return `ControlFlow::Break(())` from it
 to stop early.
 
+Before the first epoch, `train::train` calls `TrainConfig::check`, so an out-of-range value
+(a negative or NaN learning rate, a batch size of 0, an invalid schedule, …) returns
+`Error::InvalidParameter` instead of training a broken model. `ModelOptions::check` does the
+same for the architecture, and `model::pawnet_cnn` returns a `Result`.
+
 ## Training logs
 
 `--log runs/baseline.csv` writes one row per epoch, flushed as training goes:
